@@ -28,6 +28,21 @@ local NOT_FUNCTIONS = {
 ---------------------------------------------------------------------------
 
 --[[/hbdoc
+\function clocSource
+\brief Counts the number of lines of code in a source string, ignoring blank lines and comments.
+]]
+local function clocSource(srcString)
+    local count = 0
+    for line in srcString:gmatch("[^\n]*") do
+        if not line:match("^%s*$") and not line:match("^%s*//") and not line:match("^%s*/%*") then
+            count = count + 1
+        end
+    end
+    return count
+end 
+
+
+--[[/hbdoc
 \function trim
 \brief Removes leading and trailing whitespace.
 ]]
@@ -533,6 +548,7 @@ function hbDoc.ClassifyLua(fileSrc)
     local classes, funcs, macros = {}, {}, {}
     local marker = "--[[/hbdoc"
     local pos = 1
+    local loc = clocSource(fileSrc)
 
     while true do
         local blockStart = fileSrc:find(marker, pos, true)
@@ -634,7 +650,7 @@ function hbDoc.ClassifyLua(fileSrc)
         end
     end
 
-    return { classes = classes, structs = {}, funcs = standaloneFuncs, macros = macros, namespaces = {} }
+    return { classes = classes, structs = {}, funcs = standaloneFuncs, macros = macros, namespaces = {}, loc = loc }
 end
 
 ---------------------------------------------------------------------------
@@ -745,6 +761,8 @@ html {
 ]]
 function hbDoc.GenerateHTMLDocs(codebaseParsed)
     local out = { "<html><body>" }
+    out[#out + 1] = "<p>Total lines of code: " .. (codebaseParsed.loc or 0) .. "</p>"
+    out[#out + 1] = "<p>lines of code aren't a real metric of how much work was done. More of a fun fact.</p>"
     for _, class in ipairs(codebaseParsed.classes) do
         renderEntry(out, qualifiedName(class), class, "Members", class.fields)
     end
