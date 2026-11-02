@@ -752,6 +752,30 @@ img {
 html {
     font-family: Arial, sans-serif;
 }
+
+main.with-ramble {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(16rem, 1fr);
+    gap: 2rem;
+    align-items: start;
+}
+
+main.with-ramble .ramble {
+    border-left: 1px solid #ccc;
+    padding-left: 1rem;
+}
+
+@media (max-width: 48rem) {
+    main.with-ramble {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    main.with-ramble .ramble {
+        border-left: 0;
+        border-top: 1px solid #ccc;
+        padding: 1rem 0 0;
+    }
+}
 ]]
 
 -- Everything on one page.
@@ -784,7 +808,7 @@ end
 \function wrapPage
 \brief Wraps a content fragment in a complete HTML page.
 ]]
-local function wrapPage(title, body, nav, stylesheet)
+local function wrapPage(title, body, nav, stylesheet, ramble)
     return table.concat({
         '<!DOCTYPE html><html><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -793,7 +817,11 @@ local function wrapPage(title, body, nav, stylesheet)
         stylesheet and ('<link rel="stylesheet" href="' .. escapeHtml(stylesheet) .. '">') or "",
         "</head><body>",
         nav and ("<nav>" .. nav .. "</nav>") or "",
-        "<main>", body, "</main></body></html>",
+        ramble
+            and ('<main class="with-ramble"><article class="documentation">' .. body
+                .. '</article><aside class="ramble">' .. ramble .. "</aside></main>")
+            or ("<main>" .. body .. "</main>"),
+        "</body></html>",
     })
 end
 
@@ -819,16 +847,32 @@ end
 --   <a.b.Class>.html         one page per class
 --   functions.html           every free function (only if there are any)
 -- opts.stylesheet: href of a stylesheet to link from every page.
+-- opts.rambles: map of HTML filenames to raw fragments, linked from index.
 --[[/hbdoc
 \function hbDoc.GenerateSite
 \brief Renders parsed entities as a multi-page HTML site.
 \details Returns a map from output file names to HTML content, including an
 index and detail pages for documented classes, structs, functions, and macros.
+The optional rambles map associates output filenames with raw HTML fragments.
+Unmatched rambles get their own wrapped page; all rambles are linked from index.
 ]]
 function hbDoc.GenerateSite(codebaseParsed, opts)
     opts = opts or {}
     local files = {}
     local usedNames = { ["index.html"] = true, ["functions.html"] = true, ["macros.html"] = true }
+    local ramblesByTarget = {}
+    for filename, html in pairs(opts.rambles or {}) do
+        assert(type(filename) == "string" and filename:lower():match("%.html$"),
+            "Ramble filenames must end in .html")
+        assert(type(html) == "string", "Ramble content must be a string")
+        local pageName = filename:gsub("\\", "/"):match("([^/]+)$") or filename
+        local key = pageName:lower()
+        assert(not ramblesByTarget[key], "More than one ramble targets " .. pageName)
+        ramblesByTarget[key] = { filename = pageName, html = html }
+    end
+    local function rambleFor(pageName)
+        return ramblesByTarget[pageName:lower()]
+    end
 
     --[[/hbdoc
     \function uniqueFileName
@@ -926,6 +970,23 @@ function hbDoc.GenerateSite(codebaseParsed, opts)
         macroId[macro] = macroIdCounts[base] == 1 and base or (base .. "_" .. macroIdCounts[base])
     end
 
+    local formalPages = { ["index.html"] = "index.html" }
+    for _, pageName in pairs(namespaceFile) do formalPages[pageName:lower()] = pageName end
+    for _, pageName in pairs(classFile) do formalPages[pageName:lower()] = pageName end
+    for _, pageName in pairs(structFile) do formalPages[pageName:lower()] = pageName end
+    if #codebaseParsed.funcs > 0 then formalPages["functions.html"] = "functions.html" end
+    if #(codebaseParsed.macros or {}) > 0 then formalPages["macros.html"] = "macros.html" end
+
+    local ramblePages = {}
+    for key, ramble in pairs(ramblesByTarget) do
+        local stem = ramble.filename:gsub("%.[Hh][Tt][Mm][Ll]$", "")
+        local targetPage = formalPages[key]
+        ramble.pageName = targetPage or uniqueFileName(fileBase(stem))
+        ramble.title = stem
+        ramblePages[#ramblePages + 1] = ramble
+    end
+    table.sort(ramblePages, function(a, b) return a.filename:lower() < b.filename:lower() end)
+
     --[[/hbdoc
     \function namespaceLine
     \brief Renders a link to a namespace's detail page.
@@ -1009,7 +1070,9 @@ function hbDoc.GenerateSite(codebaseParsed, opts)
         local body = {}
         local preface = class.namespace and namespaceLine(namespaces[class.namespace]) or nil
         renderEntry(body, qualifiedName(class), class, "Members", class.fields, nil, preface)
-        files[classFile[class]] = wrapPage(qualifiedName(class), table.concat(body), INDEX_LINK, opts.stylesheet)
+        local pageName = classFile[class]
+        files[pageName] = wrapPage(qualifiedName(class), table.concat(body), INDEX_LINK, opts.stylesheet,
+            rambleFor(pageName) and rambleFor(pageName).html)
     end
 
     -- Struct pages
@@ -1017,7 +1080,9 @@ function hbDoc.GenerateSite(codebaseParsed, opts)
         local body = {}
         local preface = struct.namespace and namespaceLine(namespaces[struct.namespace]) or nil
         renderEntry(body, qualifiedName(struct), struct, "Fields", struct.fields, nil, preface)
-        files[structFile[struct]] = wrapPage(qualifiedName(struct), table.concat(body), INDEX_LINK, opts.stylesheet)
+        local pageName = structFile[struct]
+        files[pageName] = wrapPage(qualifiedName(struct), table.concat(body), INDEX_LINK, opts.stylesheet,
+            rambleFor(pageName) and rambleFor(pageName).html)
     end
 
     -- Namespace pages
@@ -1032,7 +1097,9 @@ function hbDoc.GenerateSite(codebaseParsed, opts)
         structList(body, ns.structs)
         functionList(body, ns.funcs)
         macroList(body, ns.macros)
-        files[namespaceFile[ns]] = wrapPage("namespace " .. ns.name, table.concat(body), INDEX_LINK, opts.stylesheet)
+        local pageName = namespaceFile[ns]
+        files[pageName] = wrapPage("namespace " .. ns.name, table.concat(body), INDEX_LINK, opts.stylesheet,
+            rambleFor(pageName) and rambleFor(pageName).html)
     end
 
     if #(codebaseParsed.macros or {}) > 0 then
@@ -1043,7 +1110,8 @@ function hbDoc.GenerateSite(codebaseParsed, opts)
             body[#body + 1] = "<pre><code>" .. escapeHtml(macro.decl or "") .. "</code></pre>"
             body[#body + 1] = "</section>"
         end
-        files["macros.html"] = wrapPage("Macros", table.concat(body), INDEX_LINK, opts.stylesheet)
+        files["macros.html"] = wrapPage("Macros", table.concat(body), INDEX_LINK, opts.stylesheet,
+            rambleFor("macros.html") and rambleFor("macros.html").html)
     end
 
     -- All functions on one page
@@ -1052,7 +1120,8 @@ function hbDoc.GenerateSite(codebaseParsed, opts)
         for _, func in ipairs(codebaseParsed.funcs) do
             renderEntry(body, qualifiedName(func), func, "Parameters", func.params, funcId[func])
         end
-        files["functions.html"] = wrapPage("Functions", table.concat(body), INDEX_LINK, opts.stylesheet)
+        files["functions.html"] = wrapPage("Functions", table.concat(body), INDEX_LINK, opts.stylesheet,
+            rambleFor("functions.html") and rambleFor("functions.html").html)
     end
 
     -- Hub
@@ -1071,7 +1140,20 @@ function hbDoc.GenerateSite(codebaseParsed, opts)
     if #(codebaseParsed.macros or {}) > 0 then
         index[#index + 1] = '<p class="all-macros"><a href="macros.html">All macros</a></p>'
     end
-    files["index.html"] = wrapPage("Documentation", table.concat(index), nil, opts.stylesheet)
+    if #ramblePages > 0 then
+        index[#index + 1] = '<h2>Rambles</h2><ul class="rambles">'
+        for _, ramble in ipairs(ramblePages) do
+            index[#index + 1] = '<li><a href="' .. escapeHtml(ramble.pageName) .. '">'
+                .. escapeHtml(ramble.title) .. "</a></li>"
+            if not formalPages[ramble.filename:lower()] then
+                files[ramble.pageName] = wrapPage(ramble.title, ramble.html, INDEX_LINK, opts.stylesheet)
+            end
+        end
+        index[#index + 1] = "</ul>"
+    end
+    local indexRamble = rambleFor("index.html")
+    files["index.html"] = wrapPage("Documentation", table.concat(index), nil, opts.stylesheet,
+        indexRamble and indexRamble.html)
 
     return files
 end
@@ -1205,6 +1287,21 @@ end
 ]]
 local function baseName(path)
     return normalizePath(path):match("([^/]+)$") or path
+end
+
+-- Load HTML fragments keyed by the generated page filename they accompany.
+local function loadRambles(ramblesDir)
+    local rambles, seen = {}, {}
+    for _, path in ipairs(listTree(ramblesDir)) do
+        if path:lower():match("%.html$") then
+            local pageName = baseName(path)
+            local key = pageName:lower()
+            assert(not seen[key], "More than one ramble targets " .. pageName)
+            seen[key] = true
+            rambles[pageName] = readFile(path)
+        end
+    end
+    return rambles
 end
 
 --[[/hbdoc
@@ -1494,11 +1591,13 @@ end
 -- opts.outDir     output folder (default "docs")
 -- opts.sharedCss  path of a stylesheet to copy into outDir and link from every page
 -- opts.imageDir   optional directory containing images to copy/convert to PNG
+-- opts.ramblesDir optional directory of HTML fragments to publish and link from index
 --[[/hbdoc
 \function hbDoc.build
 \brief Classifies source files and writes the generated documentation site.
-\details Supports Lua and C/C++ sources, an optional stylesheet, and optional
-image copying or conversion.
+\details Supports Lua and C/C++ sources, an optional stylesheet, optional image
+copying or conversion, and HTML rambles linked from the index and shown beside
+matching documentation pages.
 ]]
 function hbDoc.build(opts)
     assert(opts.files and #opts.files > 0, "No source files to document")
@@ -1531,7 +1630,8 @@ function hbDoc.build(opts)
         writeFile(outDir .. "/" .. stylesheet, readFile(opts.sharedCss, "rb"), "wb")
     end
 
-    for name, html in pairs(hbDoc.GenerateSite(all, { stylesheet = stylesheet })) do
+    local rambles = opts.ramblesDir and loadRambles(opts.ramblesDir) or nil
+    for name, html in pairs(hbDoc.GenerateSite(all, { stylesheet = stylesheet, rambles = rambles })) do
         writeFile(outDir .. "/" .. name, html)
     end
 
@@ -1543,13 +1643,14 @@ end
 \brief Command-line usage and option reference.
 ]]
 local USAGE = [[
-Usage: lua hbDoc.lua --include=FILE [--sharedcss=FILE] [--images=DIR] [--out=DIR]
-       lua hbDoc.lua --test [--sharedcss=FILE] [--images=DIR] [--out=DIR]
+Usage: lua hbDoc.lua --include=FILE [--sharedcss=FILE] [--images=DIR] [--rambles=DIR] [--out=DIR]
+       lua hbDoc.lua --test [--sharedcss=FILE] [--images=DIR] [--rambles=DIR] [--out=DIR]
        lua hbDoc.lua --self [--out=DIR]
 
   --include=FILE    gitignore-style list of C/C++ or Lua source files to document
   --sharedcss=FILE  stylesheet copied into the output folder and linked from every page
   --images=DIR      image folder; images are copied or converted to PNG
+  --rambles=DIR     directory of HTML fragments published and linked from the index
   --out=DIR         output folder (default: docs)
   --test            document test/src/*.cpp into test/docs
   --self            document hbDoc/hbDoc.lua into hbDoc/docs
@@ -1598,8 +1699,9 @@ local function main(argv)
         io.write(USAGE)
         return
     end
-    if args.include == true or args.sharedcss == true or args.images == true or args.out == true then
-        error("--include, --sharedcss, --images and --out each need a value\n\n" .. USAGE, 0)
+    if args.include == true or args.sharedcss == true or args.images == true
+        or args.rambles == true or args.out == true then
+        error("--include, --sharedcss, --images, --rambles and --out each need a value\n\n" .. USAGE, 0)
     end
     if args.self and (args.include or args.test) then
         error("--self cannot be combined with --include or --test\n\n" .. USAGE, 0)
@@ -1620,11 +1722,13 @@ local function main(argv)
 
     local outDir = args.out or (args.test and "test/docs" or (args.self and "hbDoc/docs" or "docs"))
     local imageDir = args.images or (args.test and "test/docs_res/img" or (not args.self and "docs_res/img"))
+    local ramblesDir = args.rambles or (args.test and "test/docs_res/rambles" or (not args.self and "docs_res/rambles"))
     local parsed = hbDoc.build({
         files = files,
         outDir = outDir,
         sharedCss = args.sharedcss,
         imageDir = imageDir,
+        ramblesDir = ramblesDir,
     })
     print(("Documented %d class(es), %d struct(s), %d function(s) and %d macro(s) from %d file(s) into %s/"):format(
         #parsed.classes, #parsed.structs, #parsed.funcs, #parsed.macros, #files, outDir))

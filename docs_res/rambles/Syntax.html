@@ -1,0 +1,31 @@
+<h1>hbDoc Syntax</h1>
+
+<p>Document declarations with an hbDoc comment block immediately before them.
+The tag names the kind of entry; brief and details describe it.</p>
+
+<pre><code>--[[/hbdoc
+\class Example
+\brief A documented Lua table.
+\details Longer notes can go here.
+]]
+local Example = {}
+
+--[[/hbdoc
+\function Example.run
+\brief Runs the example.
+]]
+function Example.run(input)
+    return input
+end</code></pre>
+
+<p>Use <code>\class</code>, <code>\function</code>, or <code>\macro</code>
+to document an entry. Qualified Lua functions such as
+<code>Example.run</code> appear as members of their documented class or table.
+For C and C++, put <code>/// \brief</code> and optional
+<code>/// \details</code> comments directly above the declaration.</p>
+
+<p>For custom HTML in a C/C++ documentation comment, put markup between
+<code>/// \HTMLstart</code> and <code>/// \HTMLend</code>. Rambles like this
+file are separate HTML fragments named after their page; they are shown beside
+the formal documentation and should not include <code>&lt;html&gt;</code>,
+<code>&lt;head&gt;</code>, or <code>&lt;body&gt;</code> tags.</p>

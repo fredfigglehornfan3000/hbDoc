@@ -29,7 +29,7 @@ jobs:
           luaVersion: "5.5.1"
 
       - name: Generate documentation
-        run: lua hbDoc.lua --include=docs.include --out=docs
+        run: lua hbDoc.lua --include=docs.include --rambles=docs_res/rambles --out=docs
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
