@@ -526,7 +526,8 @@ end
 \function hbDoc.ClassifyLua
 \brief Classifies Lua source using hbDoc-tagged comment blocks.
 \details Recognizes documented classes, functions, and macros, returning the
-same general result shape as the C++ classifier.
+same general result shape as the C++ classifier. Functions qualified by a
+documented class or table are listed as that class's members.
 ]]
 function hbDoc.ClassifyLua(fileSrc)
     local classes, funcs, macros = {}, {}, {}
@@ -609,7 +610,31 @@ function hbDoc.ClassifyLua(fileSrc)
         pos = blockEnd + 2
     end
 
-    return { classes = classes, structs = {}, funcs = funcs, macros = macros, namespaces = {} }
+    local standaloneFuncs = {}
+    for _, func in ipairs(funcs) do
+        local memberClass
+        for _, class in ipairs(classes) do
+            local prefix = class.name
+            local separator = func.name:sub(#prefix + 1, #prefix + 1)
+            if #func.name > #prefix + 1
+                and func.name:sub(1, #prefix) == prefix
+                and (separator == "." or separator == ":")
+                and (not memberClass or #prefix > #memberClass.name) then
+                memberClass = class
+            end
+        end
+
+        if memberClass then
+            memberClass.fields[#memberClass.fields + 1] = {
+                decl = func.decl,
+                brief = func.brief,
+            }
+        else
+            standaloneFuncs[#standaloneFuncs + 1] = func
+        end
+    end
+
+    return { classes = classes, structs = {}, funcs = standaloneFuncs, macros = macros, namespaces = {} }
 end
 
 ---------------------------------------------------------------------------
