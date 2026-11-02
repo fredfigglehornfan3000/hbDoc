@@ -1,8 +1,4 @@
--- hbDoc: pulls /// documentation out of C++ or Lua source and renders it as HTML.
---
--- Usage:
---   lua hbDoc.lua --test        (reads test/src/*.cpp, writes test/docs/index.html)
---   local hbDoc = require("hbDoc")
+
 
 --[[/hbdoc
 \class hbDoc
